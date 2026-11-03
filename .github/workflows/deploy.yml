@@ -20,18 +20,35 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
           script: |
-            # Update package lists and install Python 3 and pip
-            sudo apt-get update
-            sudo apt-get install -y python3 python3-pip
+            set -e
 
-            # Navigate to the project directory (adjust the path as needed)
+            echo "Starting deployment..."
+
+            # Step 3: Install required packages
+            sudo dnf install -y python3 python3-pip git
+
+            # Step 4: Navigate to application directory
             cd /home/ec2-user/app
 
-            #copy source code to the EC2 instance
-            git pull origin main
+            # Step 5: Pull latest code
+            git fetch origin main
+            git reset --hard origin/main
 
-            # Install Python dependencies from requirements.txt
-            pip3 install -r requirements.txt
+            # Step 6: Create virtual environment
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
 
-            # start the application (adjust the command as needed)
-            nohup python3 app.py &
+            # Step 7: Install dependencies
+            source venv/bin/activate
+
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
+
+            # Step 8: Restart application
+            sudo systemctl restart my-python-app
+
+            # Step 9: Verify application
+            sudo systemctl is-active my-python-app
+
+            echo "Deployment completed successfully!"
