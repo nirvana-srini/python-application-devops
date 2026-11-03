@@ -1,69 +1,79 @@
-name: Deploy and Install Python Dependencies on EC2
+
+name: Deploy Python to Private EC2
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      # 1. Checkout repository on GitHub runner
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Executing remote SSH commands
-        uses: appleboy/ssh-action@v1.0.3
+      # 2. Copy application to private EC2 via bastion
+      - name: Copy Python files
+        uses: appleboy/scp-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
+          host: ${{ secrets.PRIVATE_EC2_IP }}
+          username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT || 22 }}
+
+          proxy_host: ${{ secrets.BASTION_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+
+          source: "src/app.py,requirements.txt"
+          target: "/home/ec2-user/app"
+          overwrite: true
+
+      # 3. Install Python and run Flask
+      - name: Deploy application
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRIVATE_EC2_IP }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+
+          proxy_host: ${{ secrets.BASTION_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+
+          command_timeout: 15m
+
           script: |
-              set -e
+            set -e
 
-              echo "Starting deployment..."
+            sudo dnf install -y python3 python3-pip
 
-              # Install required packages
-              sudo dnf install -y python3 python3-pip git
+            cd /home/ec2-user/app
 
-              # Set application directory
-              APP_DIR="$HOME/app"
+            python3 -m venv venv
+            venv/bin/python -m pip install -r requirements.txt
+            venv/bin/python -m pip install gunicorn
 
-              # Clone repository if it doesn't exist
-              if [ ! -d "$APP_DIR/.git" ]; then
-                  echo "Application directory not found. Cloning repository..."
+            sudo tee /etc/systemd/system/my-python-app.service >/dev/null <<'EOF'
+            [Unit]
+            Description=Flask Application
+            After=network.target
 
-                  git clone https://github.com/nirvana-srini/python-application.git "$APP_DIR"
-              fi
+            [Service]
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/app
+            ExecStart=/home/ec2-user/app/venv/bin/gunicorn --chdir /home/ec2-user/app/src --bind 127.0.0.1:8080 app:app
+            Restart=always
 
-              # Navigate to application directory
-              cd "$APP_DIR"
+            [Install]
+            WantedBy=multi-user.target
+            EOF
 
-              # Pull latest code
-              git fetch origin main
-              git reset --hard origin/main
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now my-python-app
+            sudo systemctl restart my-python-app
 
-              # Verify application files
-              test -f src/app.py
-              test -f requirements.txt
-
-              # Create virtual environment
-              if [ ! -d "venv" ]; then
-                  python3 -m venv venv
-              fi
-
-              # Install dependencies
-              source venv/bin/activate
-
-              python -m pip install --upgrade pip
-              python -m pip install -r requirements.txt
-
-              # Restart application
-              sudo systemctl daemon-reload
-              sudo systemctl restart my-python-app
-
-              # Verify application
-              sudo systemctl is-active my-python-app
-
-              echo "Deployment completed successfully!"
+            curl -fsS http://127.0.0.1:8080/health
