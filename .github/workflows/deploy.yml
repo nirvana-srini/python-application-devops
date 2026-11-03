@@ -20,14 +20,18 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
           script: |
-            cd /path/to/your/app
+            # Update package lists and install Python 3 and pip
+            sudo apt-get update
+            sudo apt-get install -y python3 python3-pip
+
+            # Navigate to the project directory (adjust the path as needed)
+            cd /home/ec2-user/app
+
+            #copy source code to the EC2 instance
             git pull origin main
-            
-            # Step 1: Activate your virtual environment (highly recommended)
-            source venv/bin/activate
-            
-            # Step 2: Install your Python dependencies
-            pip install -r requirements.txt
-            
-            # Step 3: Restart your Python service (e.g., systemd, gunicorn, uwsgi)
-            sudo systemctl restart my-python-app
+
+            # Install Python dependencies from requirements.txt
+            pip3 install -r requirements.txt
+
+            # start the application (adjust the command as needed)
+            nohup python3 app.py &
