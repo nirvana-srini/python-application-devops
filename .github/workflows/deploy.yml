@@ -20,35 +20,42 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
           script: |
-            set -e
+              set -e
 
-            echo "Starting deployment..."
+              echo "Starting deployment..."
 
-            # Step 3: Install required packages
-            sudo dnf install -y python3 python3-pip git
+              # Install required packages
+              sudo dnf install -y python3 python3-pip git
 
-            # Step 4: Navigate to application directory
-            cd /home/ec2-user/app
+              # Application directory
+              APP_DIR="/home/ec2-user/app"
 
-            # Step 5: Pull latest code
-            git fetch origin main
-            git reset --hard origin/main
+              # Navigate to application
+              cd "$APP_DIR"
 
-            # Step 6: Create virtual environment
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
-            fi
+              # Pull latest code
+              git fetch origin main
+              git reset --hard origin/main
 
-            # Step 7: Install dependencies
-            source venv/bin/activate
+              # Verify application files
+              test -f src/app.py
+              test -f requirements.txt
 
-            python -m pip install --upgrade pip
-            python -m pip install -r requirements.txt
+              # Create virtual environment
+              if [ ! -d "venv" ]; then
+                python3 -m venv venv
+              fi
 
-            # Step 8: Restart application
-            sudo systemctl restart my-python-app
+              # Install dependencies
+              source venv/bin/activate
+              python -m pip install --upgrade pip
+              python -m pip install -r requirements.txt
 
-            # Step 9: Verify application
-            sudo systemctl is-active my-python-app
+              # Reload systemd and restart application
+              sudo systemctl daemon-reload
+              sudo systemctl restart my-python-app
 
-            echo "Deployment completed successfully!"
+              # Verify application
+              sudo systemctl is-active my-python-app
+
+              echo "Deployment completed successfully!"
