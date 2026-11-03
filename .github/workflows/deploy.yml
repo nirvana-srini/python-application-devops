@@ -2,8 +2,10 @@
 name: Deploy Python to Private EC2
 
 on:
-  workflow_dispatch:
-
+  push:
+    branches:
+      - main
+      
 permissions:
   contents: read
 
