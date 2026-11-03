@@ -34,7 +34,7 @@ jobs:
               if [ ! -d "$APP_DIR/.git" ]; then
                   echo "Application directory not found. Cloning repository..."
 
-                  git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git "$APP_DIR"
+                  git clone https://github.com/nirvana-srini/python-application.git "$APP_DIR"
               fi
 
               # Navigate to application directory
