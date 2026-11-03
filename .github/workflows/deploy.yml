@@ -5,63 +5,129 @@ on:
   push:
     branches:
       - main
-      
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 jobs:
   deploy:
+    name: Deploy Flask Application
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository on GitHub runner
-      - name: Checkout
+      # ========================================
+      # 1. Checkout repository
+      # ========================================
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Copy application to private EC2 via bastion
-      - name: Copy Python files
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.PRIVATE_EC2_IP }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
+      # ========================================
+      # 2. Validate secrets and files
+      # ========================================
+      - name: Validate Configuration
+        env:
+          PRIVATE_EC2_IP: ${{ secrets.PRIVATE_EC2_IP }}
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -e
 
-          proxy_host: ${{ secrets.BASTION_HOST }}
-          proxy_username: ec2-user
-          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          test -n "$PRIVATE_EC2_IP" || { echo "PRIVATE_EC2_IP missing"; exit 1; }
+          test -n "$BASTION_HOST" || { echo "BASTION_HOST missing"; exit 1; }
+          test -n "$EC2_SSH_KEY" || { echo "EC2_SSH_KEY missing"; exit 1; }
 
-          source: "src/app.py,requirements.txt"
-          target: "/home/ec2-user/app"
-          overwrite: true
+          test -f src/app.py
+          test -f requirements.txt
 
-      # 3. Install Python and run Flask
-      - name: Deploy application
+          echo "Configuration validated"
+
+      # ========================================
+      # 3. Test SSH to private EC2 via Bastion
+      # ========================================
+      - name: Test Private EC2 Connection
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.PRIVATE_EC2_IP }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
 
           proxy_host: ${{ secrets.BASTION_HOST }}
           proxy_username: ec2-user
           proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_port: 22
+
+          script: |
+            set -e
+            echo "Connected to Private EC2"
+            hostname
+            whoami
+
+      # ========================================
+      # 4. Copy files to private EC2
+      # ========================================
+      - name: Copy Python Application
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.PRIVATE_EC2_IP }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+
+          proxy_host: ${{ secrets.BASTION_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_port: 22
+
+          source: "src/app.py,requirements.txt"
+          target: "/home/ec2-user/app"
+          overwrite: true
+
+      # ========================================
+      # 5. Install and deploy Python
+      # ========================================
+      - name: Install and Deploy Flask
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRIVATE_EC2_IP }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+
+          proxy_host: ${{ secrets.BASTION_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_port: 22
 
           command_timeout: 15m
 
           script: |
             set -e
 
+            echo "Starting deployment..."
+
+            # Install Python on Amazon Linux 2023
             sudo dnf install -y python3 python3-pip
 
+            # Application directory
             cd /home/ec2-user/app
 
+            # Verify files
+            test -f src/app.py
+            test -f requirements.txt
+
+            # Create Python virtual environment
             python3 -m venv venv
+
+            # Install dependencies
             venv/bin/python -m pip install -r requirements.txt
             venv/bin/python -m pip install gunicorn
 
-            sudo tee /etc/systemd/system/my-python-app.service >/dev/null <<'EOF'
+            # Create systemd service
+            sudo tee /etc/systemd/system/my-python-app.service > /dev/null <<'EOF'
             [Unit]
-            Description=Flask Application
+            Description=Flask Python Application
             After=network.target
 
             [Service]
@@ -69,13 +135,26 @@ jobs:
             WorkingDirectory=/home/ec2-user/app
             ExecStart=/home/ec2-user/app/venv/bin/gunicorn --chdir /home/ec2-user/app/src --bind 127.0.0.1:8080 app:app
             Restart=always
+            RestartSec=5
 
             [Install]
             WantedBy=multi-user.target
             EOF
 
+            # Start service
             sudo systemctl daemon-reload
-            sudo systemctl enable --now my-python-app
+            sudo systemctl enable my-python-app
             sudo systemctl restart my-python-app
 
-            curl -fsS http://127.0.0.1:8080/health
+            # Verify service
+            sudo systemctl is-active --quiet my-python-app
+
+            # Test Flask health endpoint
+            curl --fail --show-error --silent \
+              --retry 5 \
+              --retry-delay 2 \
+              --retry-connrefused \
+              http://127.0.0.1:8080/health
+
+            echo ""
+            echo "Deployment completed successfully!"
