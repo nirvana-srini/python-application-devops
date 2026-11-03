@@ -1,0 +1,33 @@
+name: Deploy and Install Python Dependencies on EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Executing remote SSH commands
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT | default(22) }}
+          script: |
+            cd /path/to/your/app
+            git pull origin main
+            
+            # Step 1: Activate your virtual environment (highly recommended)
+            source venv/bin/activate
+            
+            # Step 2: Install your Python dependencies
+            pip install -r requirements.txt
+            
+            # Step 3: Restart your Python service (e.g., systemd, gunicorn, uwsgi)
+            sudo systemctl restart my-python-app
